@@ -1,52 +1,60 @@
-name: Build Kivy APK
-
+#[admin@fedser KivyLC]$ cat .github/workflows/build.yml 
+name: Build
 on:
   push:
-    branches:
-      - main
+    branches-ignore:
+      - data
+      - gh-pages
+    tags:
+      - '**'
   pull_request:
-  workflow_dispatch:   # возможность запустить вручную
-  release:
-    types: [created]   # запуск при создании релиза
-
+    branches-ignore:
+      - data
+      - gh-pages
+ 
 jobs:
-  build:
-    name: Build Android APK
-    runs-on: ubuntu-latest
-
-    # 🐳 Используем официальный контейнер с готовым Buildozer + Android SDK/NDK
-    container:
-      image: kivy/buildozer:latest
-
+  # Build job. Builds app for Android with Buildozer
+  build-android:
+    name: Build for Android
+    runs-on: ubuntu-20.04
+ 
     steps:
-      # 1️⃣ Клонируем код проекта
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # 2️⃣ Устанавливаем Python-зависимости (если есть requirements.txt)
-      - name: Install Python dependencies
-        run: |
-          if [ -f "requirements.txt" ]; then
-            pip install -r requirements.txt
-          fi
-
-      # 3️⃣ Сборка APK (debug)
-      - name: Build APK with Buildozer
-        run: |
-          buildozer android debug
-
-      # 4️⃣ Загружаем APK как артефакт
-      - name: Upload built APK
-        uses: actions/upload-artifact@v4
+      - name: Checkout
+        uses: actions/checkout@v2
         with:
-          name: kivy-app-apk
-          path: bin/*.apk
-
-      # 5️⃣ (опционально) Загружаем в GitHub Releases, если это релиз
-      - name: Upload to GitHub Releases
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+          path: master
+           
+      - name: Set up Python
+        uses: actions/setup-python@v2
         with:
-          files: bin/*.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          python-version: 3.8
+          architecture: x64
+           
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade Cython
+ 
+      - name: Build with Buildozer
+        uses: ArtemSBulgakov/buildozer-action@v1
+        id: buildozer
+        with:
+          repository_root: master
+          workdir: .
+          buildozer_version: stable
+ 
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: package
+          path: ${{ steps.buildozer.outputs.filename }}
+ 
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          path: data
+          ref: data # Branch name
+ 
+      - name: Push binary to data branch
+        if: github.event_name == 'push'
+        run: python master/.ci/move_binary.py "${{ steps.buildozer.outputs.filename }}" master data bin
