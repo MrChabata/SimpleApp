@@ -1,42 +1,52 @@
-name: CI
+name: Build Kivy APK
+
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:   # возможность запустить вручную
+  release:
+    types: [created]   # запуск при создании релиза
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
+    # 🐳 Используем официальный контейнер с готовым Buildozer + Android SDK/NDK
+    container:
+      image: kivy/buildozer:latest
+
     steps:
-      - uses: actions/checkout@v2
+      # 1️⃣ Клонируем код проекта
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      # used to cache dependencies with a timeout
-      - name: Get Date
-        id: get-date
+      # 2️⃣ Устанавливаем Python-зависимости (если есть requirements.txt)
+      - name: Install Python dependencies
         run: |
-          echo "::set-output name=date::$(/bin/date -u "+%Y%m%d")"
-        shell: bash
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          fi
 
-      - name: Cache Buildozer global directory
-        uses: actions/cache@v2
-        with:
-          path: .buildozer_global
-          key: buildozer-global-${{ hashFiles('buildozer.spec') }} # Replace with your path
+      # 3️⃣ Сборка APK (debug)
+      - name: Build APK with Buildozer
+        run: |
+          buildozer android debug
 
-      - uses: actions/cache@v2
+      # 4️⃣ Загружаем APK как артефакт
+      - name: Upload built APK
+        uses: actions/upload-artifact@v4
         with:
-          path: .buildozer
-          key: ${{ runner.os }}-${{ steps.get-date.outputs.date }}-${{ hashFiles('buildozer.spec') }}
+          name: kivy-app-apk
+          path: bin/*.apk
 
-      - name: Build with Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
+      # 5️⃣ (опционально) Загружаем в GitHub Releases, если это релиз
+      - name: Upload to GitHub Releases
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
         with:
-          command: buildozer android debug
-          buildozer_version: master
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v2
-        with:
-          name: package
-          path: ${{ steps.buildozer.outputs.filename }}
+          files: bin/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
